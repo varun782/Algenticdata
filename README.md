@@ -1,5 +1,5 @@
 
-live Application link : https://agentic-data-migration-planner-and.vercel.app/
+live Application link : https://agentic-data-migration-planner-and.vercel.app
 
 # Agentic Data Migration Planner & Reconciliation Workbench
 
