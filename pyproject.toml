@@ -1,0 +1,23 @@
+[project]
+name = "migration-planner"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "fastapi>=0.142.2",
+    "google-genai>=2.27.0",
+    "jinja2>=3.1.6",
+    "pydantic>=2.13.5",
+    "python-dotenv>=1.2.4",
+    "python-multipart>=0.0.32",
+    "sqlalchemy>=2.1.2",
+    "uvicorn>=0.54.0",
+]
+
+[project.scripts]
+migration-planner = "migration_planner:main"
+
+[build-system]
+requires = ["uv_build>=0.12.22,<0.13.0"]
+build-backend = "uv_build"

@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Agentic Data Migration Planner</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .hidden { display: none; }
+    </style>
+</head>
+<body class="bg-gray-100 p-8 font-sans">
+    <div class="max-w-6xl mx-auto space-y-6">
+        <h1 class="text-3xl font-bold mb-4">Agentic Data Migration Planner</h1>
+
+        <div class="bg-white p-6 rounded-lg shadow">
+            <h2 class="text-xl font-bold mb-4">1. Schemas & Rules</h2>
+            <div class="grid grid-cols-2 gap-4 text-sm">
+                <div>
+                    <h3 class="font-semibold text-gray-700">Source Schema</h3>
+                    <pre id="source-schema" class="bg-gray-50 p-2 rounded border mt-2 overflow-auto h-40"></pre>
+                </div>
+                <div>
+                    <h3 class="font-semibold text-gray-700">Target Schema</h3>
+                    <pre id="target-schema" class="bg-gray-50 p-2 rounded border mt-2 overflow-auto h-40"></pre>
+                </div>
+            </div>
+            <button id="btn-generate" class="mt-4 bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 transition">
+                Generate AI Migration Plan
+            </button>
+            <div id="generate-loading" class="hidden mt-2 text-blue-600 font-semibold">Generating plan with Gemini... this may take a moment.</div>
+        </div>
+
+        <div id="plan-section" class="bg-white p-6 rounded-lg shadow hidden">
+            <h2 class="text-xl font-bold mb-4">2. Proposed Migration Plan (Draft)</h2>
+            <p><strong>Plan ID:</strong> <span id="plan-id"></span> | <strong>Status:</strong> <span id="plan-status"></span></p>
+            
+            <div class="mt-4">
+                <h3 class="font-semibold text-gray-700">Field Mappings</h3>
+                <div id="mappings-table" class="mt-2 text-sm"></div>
+            </div>
+
+            <div class="mt-4 text-sm grid grid-cols-2 gap-4">
+                <div>
+                    <h3 class="font-semibold text-red-600">Risks & Incompatibilities</h3>
+                    <ul id="plan-risks" class="list-disc pl-5 mt-2"></ul>
+                </div>
+                <div>
+                    <h3 class="font-semibold text-yellow-600">Clarification Questions</h3>
+                    <ul id="plan-questions" class="list-disc pl-5 mt-2"></ul>
+                </div>
+            </div>
+
+            <button id="btn-approve" class="mt-4 bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700 transition">
+                Approve Plan
+            </button>
+        </div>
+
+        <div id="dry-run-section" class="bg-white p-6 rounded-lg shadow hidden">
+            <h2 class="text-xl font-bold mb-4">3. Execution & Reconciliation</h2>
+            <button id="btn-dry-run" class="bg-purple-600 text-white px-4 py-2 rounded hover:bg-purple-700 transition">
+                Run Deterministic Dry Run
+            </button>
+            
+            <div id="dry-run-results" class="hidden mt-4 p-4 border rounded bg-gray-50">
+                <h3 class="font-semibold">Dry Run Results (Execution ID: <span id="exec-id"></span>)</h3>
+                <ul class="mt-2 text-sm">
+                    <li>Source Records: <span id="count-source" class="font-bold"></span></li>
+                    <li>Accepted Records: <span id="count-accepted" class="font-bold text-green-600"></span></li>
+                    <li>Quarantined (Rejected): <span id="count-rejected" class="font-bold text-red-600"></span></li>
+                </ul>
+                <button id="btn-execute" class="mt-4 bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700 transition">
+                    Execute Migration (Insert to Target)
+                </button>
+            </div>
+        </div>
+
+        <div class="bg-white p-6 rounded-lg shadow">
+            <h2 class="text-xl font-bold mb-4">History & Rollback</h2>
+            <button id="btn-refresh-history" class="mb-4 bg-gray-200 text-gray-800 px-4 py-2 rounded hover:bg-gray-300 transition">
+                Refresh History
+            </button>
+            <div class="text-sm">
+                <p><strong>Target Database Total:</strong> <span id="target-total" class="font-bold text-blue-600"></span></p>
+                <div id="history-table" class="mt-4"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentPlanId = null;
+        let currentExecId = null;
+
+        // Fetch schemas on load
+        fetch('/api/schemas')
+            .then(res => res.json())
+            .then(data => {
+                document.getElementById('source-schema').textContent = JSON.stringify(data.source_schema, null, 2);
+                document.getElementById('target-schema').textContent = JSON.stringify(data.target_schema, null, 2);
+            });
+
+        // Generate Plan
+        document.getElementById('btn-generate').addEventListener('click', async () => {
+            const btn = document.getElementById('btn-generate');
+            const loading = document.getElementById('generate-loading');
+            btn.disabled = true;
+            loading.classList.remove('hidden');
+            
+            try {
+                const res = await fetch('/api/plan/generate', { method: 'POST' });
+                const data = await res.json();
+                
+                if (!res.ok) {
+                    alert('Error: ' + data.detail);
+                    return;
+                }
+                
+                currentPlanId = data.id;
+                document.getElementById('plan-id').textContent = data.id;
+                document.getElementById('plan-status').textContent = data.status;
+                
+                // Render Mappings
+                const mapHtml = data.mappings.map(m => 
+                    `<div class="border-b py-2"><span class="font-bold text-blue-600">${m.source_field}</span> ➜ <span class="font-bold text-green-600">${m.target_field}</span> <br/>
+                     <span class="text-gray-500 text-xs">Rule: ${m.transformation || 'None'} | Conf: ${m.confidence} | ${m.reasoning}</span></div>`
+                ).join('');
+                document.getElementById('mappings-table').innerHTML = mapHtml;
+                
+                // Render Risks & Questions
+                document.getElementById('plan-risks').innerHTML = (data.risks || []).map(r => `<li>${r}</li>`).join('');
+                document.getElementById('plan-questions').innerHTML = (data.questions || []).map(q => `<li>${q}</li>`).join('');
+                
+                document.getElementById('plan-section').classList.remove('hidden');
+                document.getElementById('btn-approve').classList.remove('hidden');
+                document.getElementById('dry-run-section').classList.add('hidden');
+                
+            } catch (e) {
+                alert(e);
+            } finally {
+                btn.disabled = false;
+                loading.classList.add('hidden');
+            }
+        });
+
+        // Approve Plan
+        document.getElementById('btn-approve').addEventListener('click', async () => {
+            if(!currentPlanId) return;
+            const res = await fetch(`/api/plan/${currentPlanId}/approve`, { method: 'POST' });
+            if(res.ok) {
+                document.getElementById('plan-status').textContent = "approved";
+                document.getElementById('btn-approve').classList.add('hidden');
+                document.getElementById('dry-run-section').classList.remove('hidden');
+                alert("Plan approved successfully!");
+            }
+        });
+
+        // Dry Run
+        document.getElementById('btn-dry-run').addEventListener('click', async () => {
+            if(!currentPlanId) return;
+            const res = await fetch(`/api/plan/${currentPlanId}/dry_run`, { method: 'POST' });
+            const data = await res.json();
+            
+            if(res.ok) {
+                currentExecId = data.execution_id;
+                document.getElementById('exec-id').textContent = currentExecId;
+                document.getElementById('count-source').textContent = data.counts.source;
+                document.getElementById('count-accepted').textContent = data.counts.accepted;
+                document.getElementById('count-rejected').textContent = data.counts.rejected;
+                
+                document.getElementById('dry-run-results').classList.remove('hidden');
+                refreshHistory();
+            } else {
+                alert(data.detail);
+            }
+        });
+
+        // Execute
+        document.getElementById('btn-execute').addEventListener('click', async () => {
+            if(!currentPlanId || !currentExecId) return;
+            if(!confirm("Are you sure you want to execute this migration?")) return;
+            
+            const res = await fetch(`/api/plan/${currentPlanId}/execute?execution_id=${currentExecId}`, { method: 'POST' });
+            const data = await res.json();
+            
+            if(res.ok) {
+                alert(data.message);
+                refreshHistory();
+            } else {
+                alert(data.detail);
+            }
+        });
+
+        // History & Rollback
+        async function refreshHistory() {
+            const res = await fetch('/api/reconciliation');
+            const data = await res.json();
+            
+            document.getElementById('target-total').textContent = data.target_total;
+            
+            const histHtml = data.executions.map(e => `
+                <div class="border p-3 mb-2 rounded bg-gray-50 flex justify-between items-center">
+                    <div>
+                        <span class="font-bold">Exec ID: ${e.id}</span> (Plan ${e.plan_id}) - Status: <span class="uppercase font-semibold">${e.status}</span><br/>
+                        <span class="text-xs text-gray-500">Accepted: ${e.accepted_count} | Rejected: ${e.rejected_count}</span>
+                    </div>
+                    ${e.status === 'executed' ? `<button onclick="rollback(${e.id})" class="bg-red-100 text-red-600 px-2 py-1 rounded hover:bg-red-200 text-xs font-bold">ROLLBACK</button>` : ''}
+                </div>
+            `).join('');
+            document.getElementById('history-table').innerHTML = histHtml;
+        }
+
+        window.rollback = async function(id) {
+            if(!confirm(`Rollback execution ${id}? This deletes target records.`)) return;
+            const res = await fetch(`/api/execution/${id}/rollback`, { method: 'POST' });
+            if(res.ok) {
+                alert("Rollback successful");
+                refreshHistory();
+            }
+        }
+
+        document.getElementById('btn-refresh-history').addEventListener('click', refreshHistory);
+        refreshHistory();
+    </script>
+</body>
+</html>
